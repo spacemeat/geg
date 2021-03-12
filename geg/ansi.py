@@ -18,3 +18,19 @@ lt_magenta_fg = '\033[95m'
 lt_cyan_fg = '\033[96m'
 lt_white_fg = '\033[97m'
 
+dk_black_bg    = '\033[48;2;0;0;0m'
+dk_red_bg      = '\033[48;2;15;0;0m'
+dk_green_bg    = '\033[48;2;0;15;0m'
+dk_yellow_bg   = '\033[48;2;15;15;0m'
+dk_orange_bg   = '\033[48;2;15;7;0m'
+dk_blue_bg     = '\033[48;2;0;0;15m'
+dk_magenta_bg  = '\033[48;2;15;0;15m'
+dk_cyan_bg     = '\033[48;2;0;15;15m'
+dk_white_bg    = '\033[48;2;15;15;15m'
+
+
+def rgb_fg(r, g, b):
+    return f'\033[38;2;{r};{g};{b}m'
+
+def rgb_bg(r, g, b):
+    return f'\033[48;2;{r};{g};{b}m'
