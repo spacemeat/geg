@@ -11,9 +11,10 @@ from enum import Enum
 import functools
 
 
+codeRegex = re.compile(r'‘[^’]+?’')
 operatorRegex = re.compile(r'operator(.+?)\(')
 ansiRegex = re.compile(r'\033\[(.*?)m')
-akaRegex = re.compile(r'\{aka ‘(.*?)’\}')
+akaRegex = re.compile(r' \{aka ‘.*?’\}')
 #scopeRegex = re.compile(r'([a-zA-Z0-9_<>&*]+::)+')
 #typeRegex = re.compile(r'‘(.*?)’')
 scopedTypeRegex =   re.compile(r'((?:[a-zA-Z0-9_]+::)+)([a-zA-Z0-9_&*.]+)')
@@ -29,11 +30,11 @@ def doShellCommand(cmd):
 
 def strPath(path, pathOpened):
     if pathOpened:
-        m = HierString(str(path), Style.PATH)
+        m = ModdedString(str(path), [], Style.PATH)
         d = path.parent
         m.markSubStr(0, len(str(d)), Style.DIR)
     else:
-        m = HierString(str(path.name), Style.PATH)
+        m = ModdedString(str(path.name), [], Style.PATH)
     return m.render()
 
 
@@ -88,7 +89,6 @@ def justifyMessage(message, start, width, ribbonColor):
     currentColors = ['', '']
     while cursor < len(message):
         if message[cursor:].startswith('\033['):
-            #breakpoint()
             colorStart = cursor
             cursor += len('\033[')
             while message[cursor] != 'm':
@@ -145,6 +145,7 @@ class Style(Enum):
     DIM = 9
     PARAM = 10
     OPERATOR = 11
+    CODE = 12
 
     @staticmethod
     def normalizeStyles(styles):
@@ -175,18 +176,8 @@ class Style(Enum):
         fg = Arjeeby(127, 127, 127)
         bg = Arjeeby(0, 0, 0)
 
-        if Style.TYPE not in styles:
-            if Style.AKA not in styles:
-                if Style.TEMPLATEARGS in styles:
-                    if styles[Style.TEMPLATEARGS] % 2 == 0:
-                        fg = Arjeeby(192, 95, 192)
-                    else:
-                        fg = Arjeeby(95, 127, 211)
-                elif Style.PARAM in styles:
-                    fg = Arjeeby(191, 147, 127)
-                else:
-                    fg = Arjeeby(127, 127, 127)
-            else:
+        if Style.CODE not in styles:
+            if Style.AKA in styles:
                 fg = Arjeeby(71, 31, 71)
 
             # file
@@ -195,23 +186,36 @@ class Style(Enum):
                 if Style.DIR in styles:
                     fg = fg.dim()
         else:
-            if Style.AKA not in styles and Style.TEMPLATEARGS not in styles:
-                fg = Arjeeby(192, 192, 95)
-
-            elif Style.AKA not in styles and Style.TEMPLATEARGS in styles:
-                #breakpoint()
-                if styles[Style.TEMPLATEARGS] % 2 == 0:
-                    fg = Arjeeby(192, 95, 192)
+            if Style.TYPE not in styles:
+                if Style.AKA not in styles:
+                    if Style.TEMPLATEARGS in styles:
+                        if styles[Style.TEMPLATEARGS] % 2 == 0:
+                            fg = Arjeeby(192, 95, 192)
+                        else:
+                            fg = Arjeeby(95, 127, 211)
+                    elif Style.PARAM in styles:
+                        fg = Arjeeby(191, 147, 127)
+                    else:
+                        fg = Arjeeby(192, 192, 95)
                 else:
-                    fg = Arjeeby(95, 127, 211)
+                    fg = Arjeeby(71, 31, 71)
             else:
-                fg = Arjeeby(71, 47, 91)
+                if Style.AKA not in styles and Style.TEMPLATEARGS not in styles:
+                    fg = Arjeeby(192, 192, 95)
 
-        if Style.SCOPE in styles or Style.NOISY in styles or Style.DIM in styles:
-            fg = fg.dim().dim()
+                elif Style.AKA not in styles and Style.TEMPLATEARGS in styles:
+                    if styles[Style.TEMPLATEARGS] % 2 == 0:
+                        fg = Arjeeby(192, 95, 192)
+                    else:
+                        fg = Arjeeby(95, 127, 211)
+                else:
+                    fg = Arjeeby(71, 47, 91)
 
-        if Style.OPERATOR in styles:
-            fg = fg.dim()
+            if Style.OPERATOR in styles:
+                fg = fg.dim()
+
+            if Style.SCOPE in styles or Style.NOISY in styles or Style.DIM in styles:
+                fg = fg.dim().dim()
 
         if Style.HIGHLIGHT in styles:
             fg = fg.highlight()
@@ -248,6 +252,14 @@ def sanitizeString(message, makeOpened, highlighted):
         refString = ''
         while (nestedString.string != refString):
             refString = nestedString.string
+
+            if refString == '‘’ is not derived from ‘std::basic_ostream<_CharT, _Traits>’':
+                breakpoint()
+            if (match := codeRegex.search(nestedString.string)):
+                #print (f'Found aka: {match.start()} - {match.end()}')
+                newSub = nestedString.markSubStr(match.start() + 1, match.end() - 1, Style.CODE)
+                rec(newSub)
+                continue
 
             akaStyle = Style.INVISIBLE
             if makeOpened:
@@ -430,7 +442,7 @@ class ModdedString:
         elif isinstance(mods, ModdedString):
             self.mods = [mods]
         else:
-            raise RuntimeError(f'"strings" must be a list of ModdedStrings or a ModdedString.')
+            raise RuntimeError(f'"mods" must be a list of ModdedStrings or a ModdedString.')
 
         if len(self.strings) - len(self.mods) != 1:
             raise RuntimeError(f'There should be one more string than mod.')
@@ -458,11 +470,12 @@ class ModdedString:
 
     def displaceSubStr(self, start, end, forgetIt=True, styles={}):
         cm = ansi.rgb_fg(63, 63, 255)
+        ch = ansi.rgb_fg(192, 143, 127)
         cs = ansi.rgb_fg(127, 255, 127)
 
         styles = Style.normalizeStyles(styles)
 
-        #print (f'{cm}DisplaceSubStr: start: {start}; end: {end}; from: \'{cs}{self.string[0:start]}{cm}{self.string[start:end]}{cs}{self.string[end:]}{cm}\' as {"|".join([s.name for s in styles.keys()])}{ansi.all_off}')
+        #print (f'{cm}DisplaceSubStr: start: {start}; end: {end}; from: \'{cs}{self.string[0:start]}{ch}{self.string[start:end]}{cs}{self.string[end:]}{cm}\' as {"|".join([s.name for s in styles.keys()])}{ansi.all_off}')
         #print (f'{cm}     Top self is:\n{ansi.all_off}{self}')
 
         #if self.string[start:end] == 'enable':
@@ -910,8 +923,8 @@ class Issue:
     def toggleIssue(self, counter, target):
         if len(self.notes) + len(self.children) > 0:
             counter.inc()
-        if counter.count == target:
-            self.issueOpened = not self.issueOpened
+            if counter.count == target:
+                self.issueOpened = not self.issueOpened
         else:
             if self.issueOpened:
                 for ch in self.children:

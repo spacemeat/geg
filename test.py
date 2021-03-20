@@ -62,6 +62,7 @@ typename std::enable_if
 )'''
 
 errorm = '''template<class _Ostream, class _Tp> typename std::enable_if<std::__and_<std::__not_<std::is_lvalue_reference<_Tp> >, std::__is_convertible_to_basic_ostream<_Ostream>, std::__is_insertable<typename std::__is_convertible_to_basic_ostream<_Tp>::__ostream_type, const _Tp&, void>>::value, typename std::__is_convertible_to_basic_ostream<_Tp>::__ostream_type>::type std::operator<<(_Ostream&&, const _Tp&)'''
+errorm = '''‘std::istream’ {aka ‘std::basic_istream<char>’} is not derived from ‘std::basic_ostream<_CharT, _Traits>’'''
 s1 = geg.sanitizeString(errorm, True, False)
 print('')
 s2 = geg.sanitizeString(errorm, False, False)
