@@ -4,9 +4,13 @@ A groking tool for gcc/g++ error messages.
 
 Install with:
 
+`$ pip install geg`
+
+Or, from local source:
+
 `$ pip install -e .`
 
-in this base directory.
+in the base repo directory.
 
 Then, invoke gcc/g++, but preceding it with geg:
 
@@ -25,4 +29,4 @@ Then you can invoke it as:
 
 `$ geg g++ ...`
 
-But be aware that scripts might not be so great with interactive tools, so you may want to conditionally alias the invocation.
+Be aware that scripts might not be so great with interactive tools, so you may want to conditionally alias the invocation.
