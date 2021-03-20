@@ -342,14 +342,6 @@ def sanitizeString(message, makeOpened, highlighted):
                 newSub = nestedString.markSubStr(tn, tn + len('class '), Style.DIM)
                 continue
 
-            if (tn := nestedString.string.find('::type')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('::type'), Style.combineStyles(noisyStyle, Style.TYPE))
-                continue
-
-            if (tn := nestedString.string.find('::value')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('::value'), Style.combineStyles(noisyStyle, Style.TYPE))
-                continue
-
             match = scopedTypeRegex.search(nestedString.string)
             if match and not nestedString.string.endswith('::'):
                 scopeStr = match.group(1)
@@ -379,6 +371,14 @@ def sanitizeString(message, makeOpened, highlighted):
 
             if (tn := nestedString.string.find('()')) >= 0:
                 newSub = nestedString.markSubStr(tn, tn + len('()'), [Style.PARAM, Style.OPERATOR])
+                continue
+
+            if (tn := nestedString.string.find('::type')) >= 0:
+                newSub = nestedString.markSubStr(tn, tn + len('::type'), Style.combineStyles(noisyStyle, Style.TYPE))
+                continue
+
+            if (tn := nestedString.string.find('::value')) >= 0:
+                newSub = nestedString.markSubStr(tn, tn + len('::value'), Style.combineStyles(noisyStyle, Style.TYPE))
                 continue
 
             match = scopeLayerRegex.search(nestedString.string)
@@ -475,7 +475,7 @@ class ModdedString:
 
         styles = Style.normalizeStyles(styles)
 
-        #print (f'{cm}DisplaceSubStr: start: {start}; end: {end}; from: \'{cs}{self.string[0:start]}{ch}{self.string[start:end]}{cs}{self.string[end:]}{cm}\' as {"|".join([s.name for s in styles.keys()])}{ansi.all_off}')
+        print (f'{cm}DisplaceSubStr: start: {start}; end: {end}; from: \'{cs}{self.string[0:start]}{ch}{self.string[start:end]}{cs}{self.string[end:]}{cm}\' as {"|".join([s.name for s in styles.keys()])}{ansi.all_off}')
         #print (f'{cm}     Top self is:\n{ansi.all_off}{self}')
 
         #if self.string[start:end] == 'enable':
