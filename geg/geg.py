@@ -2,7 +2,7 @@ import sys
 import json
 import subprocess
 from pathlib import Path
-from . import ansi
+from . import ansi as a
 import shutil
 import re
 import math
@@ -11,70 +11,28 @@ from enum import Enum
 import functools
 
 
+debugLevel = 0
+def printDebug(level, string):
+    if level <= debugLevel:
+        print (string)
+
+
 codeRegex = re.compile(r'‘[^’]+?’')
 operatorRegex = re.compile(r'operator(.+?)\(')
 ansiRegex = re.compile(r'\033\[(.*?)m')
 akaRegex = re.compile(r' \{aka ‘.*?’\}')
-#scopeRegex = re.compile(r'([a-zA-Z0-9_<>&*]+::)+')
-#typeRegex = re.compile(r'‘(.*?)’')
 scopedTypeRegex =   re.compile(r'((?:[a-zA-Z0-9_]+::)+)([a-zA-Z0-9_&*.]+)')
 scopeLayerRegex =   re.compile(r'([a-zA-Z0-9_]+::)')
 templateTypeRegex = re.compile(r'([a-zA-Z0-9_]+)<>::')
-underscoredRegex =  re.compile(r'_+([a-zA-Z0-9_]+?)_+$')
 
 
 def doShellCommand(cmd):
-    print (f"{ansi.rgb_fg(63, 63, 63)}{cmd}{ansi.all_off}")
+    print (f"{a.Rgb(63, 63, 63).fg()}{cmd}{a.off}")
     return subprocess.run(cmd, shell=True, check=False, encoding='utf-8', capture_output=True)
-
-
-def strPath(path, pathOpened):
-    if pathOpened:
-        m = ModdedString(str(path), [], Style.PATH)
-        d = path.parent
-        m.markSubStr(0, len(str(d)), Style.DIR)
-    else:
-        m = ModdedString(str(path.name), [], Style.PATH)
-    return m.render()
 
 
 def strNoColor(string):
     return re.sub(ansiRegex, lambda m: '', string)
-
-
-def sanitizeMessage(message, makeOpened, highlighted):
-    sMessage = ''
-    for i in range(0, len(message)):
-        if message[i] == ' ' and len(message) < i + 1 and message[i + 1] == '>':
-            i += 1
-        sMessage += message[i]
-    sMessage = message
-    m = HierString(sMessage, Style.HIGHLIGHT if highlighted else {})
-
-    # remove 'aka' bits
-    if makeOpened:
-        for match in akaRegex.finditer(sMessage):
-            #print (f'Found aka: {match.start()} - {match.end()}')
-            m.markSubStr(match.start(), match.end(), Style.AKA)
-    else:
-        for match in akaRegex.finditer(sMessage):
-            #print (f'Found aka: {match.start()} - {match.end()}')
-            m.markSubStr(match.start(), match.end(), Style.INVISIBLE)
-
-    if makeOpened:
-        for match in scopeRegex.finditer(sMessage):
-            #print (f'Found scope: {match.start()} - {match.end()}')
-            m.markSubStr(match.start(), match.end(), Style.SCOPE)
-    else:
-        for match in scopeRegex.finditer(sMessage):
-            #print (f'Found scope: {match.start()} - {match.end()}')
-            m.markSubStr(match.start(), match.end(), Style.INVISIBLE)
-
-    for match in typeRegex.finditer(sMessage):
-        #print (f'Found type: {match.start()} - {match.end()}')
-        m.markSubStr(match.start(), match.end(), Style.TYPE)
-
-    return m.render()
 
 
 def justifyMessage(message, start, width, ribbonColor):
@@ -104,32 +62,13 @@ def justifyMessage(message, start, width, ribbonColor):
             cursor += 1
 
         if chonkRemaining == 0 and cursor < len(message):
-            src += f'{ansi.all_off}\n{ribbonColor}    {ansi.all_off}{" " * (start - 4)}{currentColors[0]}{currentColors[1]}'
+            src += f'{a.off}\n{ribbonColor}    {a.off}{" " * (start - 4)}{currentColors[0]}{currentColors[1]}'
             chonkRemaining = chonkLen
 
     src += ' ' * chonkRemaining
-    src += ansi.all_off
+    src += a.off
 
     return src
-
-
-class Arjeeby:
-    def __init__(self, r = 0, g = 0, b = 0):
-        self.r = r
-        self.g = g
-        self.b = b
-
-    def fg(self):
-        return ansi.rgb_fg(int(self.r), int(self.g), int(self.b))
-
-    def bg(self):
-        return ansi.rgb_bg(int(self.r), int(self.g), int(self.b))
-
-    def highlight(self):
-        return Arjeeby(min(self.r * 2, 255), min(self.g * 2, 255), min(self.b * 2, 255))
-
-    def dim(self):
-        return Arjeeby(self.r / 2, self.g / 2, self.b / 2)
 
 
 class Style(Enum):
@@ -159,12 +98,17 @@ class Style(Enum):
             raise RuntimeError('Styles must be a dict, list, or Style')
 
     @staticmethod
-    def combineStyles(aStyles, bStyles):
-        aStyles = Style.normalizeStyles(aStyles)
-        bStyles = Style.normalizeStyles(bStyles)
+    def cascadeStyles(ontoStyles, fromStyles):
+        ontoStyles = Style.normalizeStyles(ontoStyles)
+        fromStyles = Style.normalizeStyles(fromStyles)
 
-        sts = copy.deepcopy(aStyles)
-        for s, c in bStyles.items():
+        # these styles don't cascade
+        fromStyles.pop(Style.SCOPE, None)
+        fromStyles.pop(Style.NOISY, None)
+        fromStyles.pop(Style.OPERATOR, None)
+
+        sts = copy.deepcopy(ontoStyles)
+        for s, c in fromStyles.items():
             if s in sts:
                 sts[s] += c
             else:
@@ -173,16 +117,18 @@ class Style(Enum):
 
     @staticmethod
     def getColors(styles):
-        fg = Arjeeby(127, 127, 127)
-        bg = Arjeeby(0, 0, 0)
+        styles = Style.normalizeStyles(styles)
+
+        fg = a.Rgb(127, 127, 127)
+        bg = a.Rgb(0, 0, 0)
 
         if Style.CODE not in styles:
             if Style.AKA in styles:
-                fg = Arjeeby(71, 31, 71)
+                fg = a.Rgb(71, 31, 71)
 
             # file
             if Style.PATH in styles:
-                fg = Arjeeby(31, 255, 255)
+                fg = a.Rgb(31, 255, 255)
                 if Style.DIR in styles:
                     fg = fg.dim()
         else:
@@ -190,26 +136,26 @@ class Style(Enum):
                 if Style.AKA not in styles:
                     if Style.TEMPLATEARGS in styles:
                         if styles[Style.TEMPLATEARGS] % 2 == 0:
-                            fg = Arjeeby(192, 95, 192)
+                            fg = a.Rgb(192, 95, 192)
                         else:
-                            fg = Arjeeby(95, 127, 211)
+                            fg = a.Rgb(95, 127, 211)
                     elif Style.PARAM in styles:
-                        fg = Arjeeby(191, 147, 127)
+                        fg = a.Rgb(191, 147, 127)
                     else:
-                        fg = Arjeeby(192, 192, 95)
+                        fg = a.Rgb(192, 192, 95)
                 else:
-                    fg = Arjeeby(71, 31, 71)
+                    fg = a.Rgb(71, 31, 71)
             else:
                 if Style.AKA not in styles and Style.TEMPLATEARGS not in styles:
-                    fg = Arjeeby(192, 192, 95)
+                    fg = a.Rgb(192, 192, 95)
 
                 elif Style.AKA not in styles and Style.TEMPLATEARGS in styles:
                     if styles[Style.TEMPLATEARGS] % 2 == 0:
-                        fg = Arjeeby(192, 95, 192)
+                        fg = a.Rgb(192, 95, 192)
                     else:
-                        fg = Arjeeby(95, 127, 211)
+                        fg = a.Rgb(95, 127, 211)
                 else:
-                    fg = Arjeeby(71, 47, 91)
+                    fg = a.Rgb(71, 47, 91)
 
             if Style.OPERATOR in styles:
                 fg = fg.dim()
@@ -223,7 +169,17 @@ class Style(Enum):
         return (fg.fg(), bg.bg())
 
 
-def sanitizeString(message, makeOpened, highlighted):
+def sanitizePath(path, pathOpened):
+    if pathOpened:
+        m = ModdedString(str(path), [], Style.PATH)
+        d = path.parent
+        m.modSubstring(0, len(str(d)), Style.DIR)
+    else:
+        m = ModdedString(str(path.name), [], Style.PATH)
+    return m.render()
+
+
+def sanitizeMessage(message, makeOpened, highlighted):
     sMessage = ''
     for i in range(0, len(message)):
         if message[i] == ' ' and i + 1 < len(message) and message[i + 1] == '>':
@@ -231,59 +187,49 @@ def sanitizeString(message, makeOpened, highlighted):
         sMessage += message[i]
     message = sMessage
 
-    cm = ansi.rgb_fg(191, 63, 255)
-    cs = ansi.rgb_fg(255, 255, 255)
+    cm = a.Rgb(191, 63, 255).fg()
+    cs = a.Rgb(255, 255, 255).fg()
 
-    scopeStyle = ''
+    scopeStyle = Style.INVISIBLE
     if makeOpened:
         scopeStyle = Style.SCOPE
-    else:
-        scopeStyle = Style.INVISIBLE
 
-    noisyStyle = ''
+    noisyStyle = Style.INVISIBLE
     if makeOpened:
         noisyStyle = Style.NOISY
-    else:
-        noisyStyle = Style.INVISIBLE
+
+    akaStyle = Style.INVISIBLE
+    if makeOpened:
+        akaStyle = Style.AKA
 
     def rec(nestedString):
-        #print (f'{ansi.rgb_fg(192, 192, 192)}rec -     string: {ansi.rgb_fg(192, 122, 192)}{nestedString.string}')
         # run until the string stops changing
         refString = ''
         while (nestedString.string != refString):
             refString = nestedString.string
 
-            if refString == '‘’ is not derived from ‘std::basic_ostream<_CharT, _Traits>’':
-                breakpoint()
             if (match := codeRegex.search(nestedString.string)):
-                #print (f'Found aka: {match.start()} - {match.end()}')
-                newSub = nestedString.markSubStr(match.start() + 1, match.end() - 1, Style.CODE)
+                newSub = nestedString.modSubstring(match.start() + 1, match.end() - 1, Style.CODE)
                 rec(newSub)
                 continue
 
-            akaStyle = Style.INVISIBLE
-            if makeOpened:
-                akaStyle = Style.AKA
-
             if (match := akaRegex.search(nestedString.string)):
                 if match.end() - match.start() < len(nestedString.string):
-                    #print (f'Found aka: {match.start()} - {match.end()}')
-                    newSub = nestedString.markSubStr(match.start(), match.end(), akaStyle)
+                    newSub = nestedString.modSubstring(match.start(), match.end(), akaStyle)
                     rec(newSub)
                     continue
 
             if match := operatorRegex.search(nestedString.string):
-                #print (f'Found aka: {match.start()} - {match.end()}')
-                newSub = nestedString.markSubStr(match.start() + len('operator'), match.end() - 1, Style.OPERATOR)
+                newSub = nestedString.modSubstring(match.start() + len('operator'), match.end() - 1, Style.OPERATOR)
                 rec(newSub)
                 continue
 
             if (tn := nestedString.string.find('typename ')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('typename '), Style.INVISIBLE)
+                newSub = nestedString.modSubstring(tn, tn + len('typename '), Style.INVISIBLE)
                 continue
 
             if (tn := nestedString.string.find('template')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('template'), Style.TYPE)
+                newSub = nestedString.modSubstring(tn, tn + len('template'), Style.TYPE)
                 continue
 
             def findPairOf(startCh, endCh, styles={}):
@@ -293,14 +239,12 @@ def sanitizeString(message, makeOpened, highlighted):
                         if i < len(nestedString.string) - 1 and nestedString.string[i + 1] != endCh:
                             lessPos = i
                     if ch == endCh and lessPos > -1 and i > 0 and nestedString.string[i - 1] != startCh:
-                        #breakpoint()
-                        #print (f'{cm}Found {cs}<>{cm} pair.{ansi.all_off}')
-                        newSub = nestedString.markSubStr(lessPos + 1, i, styles)
+                        newSub = nestedString.modSubstring(lessPos + 1, i, styles)
                         rec(newSub)
                         return True
                 return False
 
-            if findPairOf('<', '>'):
+            if findPairOf('<', '>', Style.TEMPLATEARGS):
                 continue
 
             if findPairOf('(', ')', Style.PARAM):
@@ -316,14 +260,12 @@ def sanitizeString(message, makeOpened, highlighted):
                 for i, ch in enumerate(nestedString.string):
                     if ch == ',':
                         if i > 0:
-                            newSub = nestedString.markSubStr(0, i)
+                            newSub = nestedString.modSubstring(0, i)
                             rec(newSub)
-                            #print (f'{cm}Found {cs},{cm}.{ansi.all_off}')
                             return True
                         elif len(nestedString.string) > 1:
-                            newSub = nestedString.markSubStr(i + 1, len(nestedString.string))
+                            newSub = nestedString.modSubstring(i + 1, len(nestedString.string))
                             rec(newSub)
-                            #print (f'{cm}Found ${cs},{cm}.{ansi.all_off}')
                             return True
                 return False
 
@@ -331,15 +273,15 @@ def sanitizeString(message, makeOpened, highlighted):
                 continue
 
             if (tn := nestedString.string.find('const ')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('const '), Style.DIM)
+                newSub = nestedString.modSubstring(tn, tn + len('const '), Style.DIM)
                 continue
 
             if (tn := nestedString.string.find('class ')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('class '), Style.DIM)
+                newSub = nestedString.modSubstring(tn, tn + len('class '), Style.DIM)
                 continue
 
             if (tn := nestedString.string.find('struct ')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('class '), Style.DIM)
+                newSub = nestedString.modSubstring(tn, tn + len('class '), Style.DIM)
                 continue
 
             match = scopedTypeRegex.search(nestedString.string)
@@ -347,76 +289,70 @@ def sanitizeString(message, makeOpened, highlighted):
                 scopeStr = match.group(1)
                 typeStr = match.group(2)
 
-                #if (typeStr == 'type' or typeStr == 'value') and len(scopeStr) >= 2:
-                #    #breakpoint()
-                #    newSub = nestedString.markSubStr(match.start() + len(scopeStr) - 2,
-                #                                     match.start() + len(scopeStr) + len(typeStr),
-                #                                     noisyStyle)
-                #else:
-                newSub = nestedString.markSubStr(match.start(), match.end(), Style.TYPE)
-                newSub2 = newSub.markSubStr(0, len(scopeStr), scopeStyle)
+                newSub = nestedString.modSubstring(match.start(), match.end(), Style.TYPE)
+                newSub2 = newSub.modSubstring(0, len(scopeStr), scopeStyle)
                 rec(newSub)
                 rec(newSub2)
-                #continue
+                continue
 
             match = templateTypeRegex.search(nestedString.string)
             if match:
-                newSub = nestedString.markSubStr(match.start(), match.end() - 2, Style.TYPE)
+                newSub = nestedString.modSubstring(match.start(), match.end() - 2, Style.TYPE)
                 rec(newSub)
                 continue
 
             if (tn := nestedString.string.find('<>')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('<>'), [Style.TEMPLATEARGS, Style.OPERATOR])
+                newSub = nestedString.modSubstring(tn, tn + len('<>'))
                 continue
 
             if (tn := nestedString.string.find('()')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('()'), [Style.PARAM, Style.OPERATOR])
+                newSub = nestedString.modSubstring(tn, tn + len('()'), [Style.PARAM, Style.OPERATOR])
                 continue
 
             if (tn := nestedString.string.find('::type')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('::type'), Style.combineStyles(noisyStyle, Style.TYPE))
+                newSub = nestedString.modSubstring(tn, tn + len('::type'), [noisyStyle, Style.TYPE])
                 continue
 
             if (tn := nestedString.string.find('::value')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('::value'), Style.combineStyles(noisyStyle, Style.TYPE))
+                newSub = nestedString.modSubstring(tn, tn + len('::value'), [noisyStyle, Style.TYPE])
                 continue
 
             match = scopeLayerRegex.search(nestedString.string)
             if match and match.end() - match.start() < len(nestedString.string):
-                newSub = nestedString.markSubStr(match.start(), match.end(), scopeStyle)
+                newSub = nestedString.modSubstring(match.start(), match.end(), scopeStyle)
                 rec(newSub)
                 continue
 
             if nestedString.string.startswith('::') and len(nestedString.string) > 2:
-                newSub = nestedString.markSubStr(0, 2)
+                newSub = nestedString.modSubstring(0, 2)
                 continue
 
             if nestedString.string.startswith(' ') and len(nestedString.string) > 1:
-                newSub = nestedString.markSubStr(0, 1)
+                newSub = nestedString.modSubstring(0, 1)
                 continue
 
             if nestedString.string.endswith(' ') and len(nestedString.string) > 1:
-                newSub = nestedString.markSubStr(len(nestedString.string) - 1, len(nestedString.string))
+                newSub = nestedString.modSubstring(len(nestedString.string) - 1, len(nestedString.string))
                 continue
 
             if nestedString.string.startswith('_') and len(nestedString.string) > 1:
-                newSub = nestedString.markSubStr(0, 1, noisyStyle)
+                newSub = nestedString.modSubstring(0, 1, noisyStyle)
                 continue
 
             if nestedString.string.endswith('_') and len(nestedString.string) > 1:
-                newSub = nestedString.markSubStr(len(nestedString.string) - 1, len(nestedString.string), noisyStyle)
+                newSub = nestedString.modSubstring(len(nestedString.string) - 1, len(nestedString.string), noisyStyle)
                 continue
 
-            if (tn := nestedString.string.find('&&')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('&&'), Style.OPERATOR)
+            if (tn := nestedString.string.find('&&')) >= 0 and len(nestedString.string) > 2:
+                newSub = nestedString.modSubstring(tn, tn + len('&&'), Style.OPERATOR)
                 continue
 
-            if (tn := nestedString.string.find('&')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('&'), Style.OPERATOR)
+            if (tn := nestedString.string.find('&')) >= 0 and len(nestedString.string) > 1:
+                newSub = nestedString.modSubstring(tn, tn + len('&'), Style.OPERATOR)
                 continue
 
-            if (tn := nestedString.string.find('*')) >= 0:
-                newSub = nestedString.markSubStr(tn, tn + len('*'), Style.OPERATOR)
+            if (tn := nestedString.string.find('*')) >= 0 and len(nestedString.string) > 1:
+                newSub = nestedString.modSubstring(tn, tn + len('*'), Style.OPERATOR)
                 continue
 
     ns = ModdedString(message, [], Style.HIGHLIGHT if highlighted else {})
@@ -426,9 +362,8 @@ def sanitizeString(message, makeOpened, highlighted):
 
 class ModdedString:
     def __init__(self, strings, mods = [], styles = {}):
-        cm = ansi.rgb_fg(192, 192, 192)
-        cs = ansi.rgb_fg(192, 192, 92)
-        #print (f'{cm}New ModdedString: string: {len(mods)} children - \'{cs}{"".join(strings)}\'')
+        cm = a.Rgb(192, 192, 192).fg()
+        cs = a.Rgb(192, 192, 92).fg()
 
         if isinstance(strings, list):
             self.strings = strings
@@ -451,13 +386,13 @@ class ModdedString:
 
 
     def reprRec(self, depth = 0):
-        cm = ansi.rgb_fg(192, 192, 192)
-        cs = ansi.rgb_fg(255, 157, 184)
+        cm = a.Rgb(192, 192, 192).fg()
+        cs = a.Rgb(255, 157, 184).fg()
         src = ''
         src += f'{cm}{"- " * depth}children: {cs}{len(self.mods)}\n'
         src += f'{cm}{"- " * depth}styles: {cs}{"|".join([s.name for s in self.styles])}\n'
         src += ''.join([f'{cm}{"- " * depth}\'{cs}{s}{cm}\'\n' for s in self.strings])
-        src += f'{ansi.all_off}\n'
+        src += f'{a.off}\n'
         for n in self.mods:
             src += n.reprRec(depth + 1)
 
@@ -468,18 +403,18 @@ class ModdedString:
         return self.reprRec()
 
 
-    def displaceSubStr(self, start, end, forgetIt=True, styles={}):
-        cm = ansi.rgb_fg(63, 63, 255)
-        ch = ansi.rgb_fg(192, 143, 127)
-        cs = ansi.rgb_fg(127, 255, 127)
+    def modSubstring(self, start, end, styles={}):
+        assert(start >= 0 and start < len(self.string))
+        assert(end > 0 and end <= len(self.string) and start < end)
+
+        cm = a.Rgb(63, 63, 255).fg()
+        ch = a.Rgb(192, 143, 127).fg()
+        cs = a.Rgb(127, 255, 127).fg()
 
         styles = Style.normalizeStyles(styles)
 
-        print (f'{cm}DisplaceSubStr: start: {start}; end: {end}; from: \'{cs}{self.string[0:start]}{ch}{self.string[start:end]}{cs}{self.string[end:]}{cm}\' as {"|".join([s.name for s in styles.keys()])}{ansi.all_off}')
-        #print (f'{cm}     Top self is:\n{ansi.all_off}{self}')
-
-        #if self.string[start:end] == 'enable':
-        #    breakpoint()
+        printDebug (1, f'{cm}DisplaceSubStr: start: {start}; end: {end}; from: \'{cs}{self.string[0:start]}{ch}{self.string[start:end]}{cs}{self.string[end:]}{cm}\' as {"|".join([s.name for s in styles.keys()])}{a.off}')
+        printDebug (2, f'{cm}     Top self is:\n{a.off}{self}')
 
         removals = []
         newStrings = []
@@ -489,7 +424,6 @@ class ModdedString:
         strEnd = -1
         newStrL = None
         newStrR = None
-        #breakpoint()
         for i, s in enumerate(self.strings):
             if strStart < 0 and start >= totalLen and start < totalLen + len(s):
                 strStart = i
@@ -501,9 +435,6 @@ class ModdedString:
                 else:
                     newStrR = (s[:end - totalLen], s[end - totalLen:])
             totalLen += len(s)
-
-        #print (f'newStrL: {newStrL}')
-        #print (f'newStrR: {newStrR}')
 
         assert(strStart >= 0)
         assert(strEnd >= strStart)
@@ -545,9 +476,7 @@ class ModdedString:
             for i in range(strStart + 1, strEnd):
                 del self.mods[strStart + 1]
 
-        #print (f'{cm}Displaced string: strStart: {strStart}; strEnd: {strEnd} \'{cs}{m.string}\'')
-        #print (f'{cm}     Now self is:\n{ansi.all_off}{self}')
-
+        printDebug (2, f'{cm}     Now self is:\n{a.off}{self}')
         assert(len(self.strings) - len(self.mods) == 1)
 
         return m
@@ -558,23 +487,12 @@ class ModdedString:
         return ''.join(self.strings)
 
 
-    def markSubStr(self, start, end, styles={}):
-        assert(start >= 0 and start < len(self.string))
-        assert(end > 0 and end <= len(self.string) and start < end)
-        return self.displaceSubStr(start, end, False, styles)
-
-
     def render(self, styles={}):
         src = ''
 
         styles = Style.normalizeStyles(styles)
 
-        styles.pop(Style.SCOPE, None)
-        styles.pop(Style.NOISY, None)
-        styles.pop(Style.OPERATOR, None)
-        #styles.pop(Style.TYPE, None)
-
-        cascadedStyles = Style.combineStyles(self.styles, styles)
+        cascadedStyles = Style.cascadeStyles(self.styles, styles)
         fg, bg = Style.getColors(cascadedStyles)
 
         if Style.INVISIBLE not in cascadedStyles:
@@ -583,261 +501,6 @@ class ModdedString:
                     src += f'{fg}{bg}{s}'
                 src += m.render(cascadedStyles)
             src += f'{fg}{bg}{self.strings[-1]}'
-
-        return src
-
-
-    '''
-candidate: ‘
-template<class _Ostream, class _Tp>
-typename std::enable_if<
-    std::__and_<
-        std::__not_<
-            std::is_lvalue_reference<
-                _Tp
-            >
-        >,
-        std::__is_convertible_to_basic_ostream<
-            _Ostream
-        >,
-        std::__is_insertable<
-            typename std::__is_convertible_to_basic_ostream<
-                _Tp
-            >::__ostream_type,
-            const _Tp&,
-            void
-        >
-    >::value,
-    typename std::__is_convertible_to_basic_ostream<
-        _Tp
-    >::__ostream_type
->::type std::operator<<(_Ostream&&, const _Tp&)’
-'''
-
-
-    '''
-0         1         2         3         4         5         6         7         8         9         0
-0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
-template<> typename std::enable_if<>::type std::operator(_Ostream&&, const _Tp&)
-,
- typename std::__is_convertible_to_basic_ostream<>::__ostream_type
-,
-'''
-
-
-
-class NestedString:
-    def __init__(self, string, start = 0, end = 0, styles = {}):
-        print (f'{ansi.rgb_fg(192, 192, 192)}New NestedString: start: {start}; end: {end}; string: \'{ansi.rgb_fg(192, 192, 92)}{string}\'')
-        self.string = string
-        self.start = start
-        self.end = end if end > 0 else len(string)
-        self.nested = []
-        if isinstance(styles, dict):
-            self.styles = styles
-        elif isinstance(styles, list):
-            self.styles = {s:None for s in styles}
-        elif isinstance(styles, Style):
-            self.styles = {styles: None}
-
-
-    def reprRec(self, depth = 0):
-        src = f'{" " * depth * 2}{ansi.rgb_fg(192, 192, 192)}start: {self.start}, end: {self.end}, {len(self.nested)} children - \'{ansi.rgb_fg(255, 157, 184)}{self.string}{ansi.all_off}\'\n'
-        for n in self.nested:
-            src += n.reprRec(depth + 1)
-
-        return src
-
-
-    def __repr__(self):
-        return self.reprRec()
-
-
-    def displaceSubStr(self, start, end, forgetIt=True, styles={}):
-        cm = ansi.rgb_fg(63, 63, 255)
-        cs = ansi.rgb_fg(127, 255, 127)
-        print (f'{cm}DisplaceSubStr: start: {start}; end: {end}; from: \'{cs}{self.string[0:start]}{cm}{self.string[start:end]}{cs}{self.string[end:]}{cm}\'{ansi.all_off}')
-        removals = []
-        for i, nns in enumerate(self.nested):
-            if nns.start >= end:
-                #nns.start -= (end - start)
-                #nns.end -= (end - start)
-                pass
-            elif nns.start >= start:
-                #nns.start -= start
-                #nns.end -= start
-                removals.append(i)
-            elif nns.end < start:
-                pass
-
-        newSub = NestedString(self.string[start : end], start, end, styles)
-        newSub.nested = [self.nested[i] for i in removals]
-
-        removals.sort(reverse=True)
-        for i in removals:
-            del self.nested[i]
-
-        self.string = self.string[:start] + self.string[end:]
-
-        if not forgetIt:
-            # add the new nested string at the correct place
-            for i, nns in enumerate(self.nested):
-                if nns.start > start:
-                    #self.nested.insert(i - 1, newSub)
-                    self.nested.append(newSub)
-                    print (f'{ansi.rgb_fg(63, 63, 255)}Displaced string: \'{ansi.rgb_fg(0, 255, 255)}{newSub.string}{ansi.rgb_fg(63, 63, 255)}\'')
-                    print (f'{ansi.rgb_fg(63, 63, 255)}     Now self is:\n{ansi.all_off}{self}')
-                    return newSub
-
-            # we didn't add it before anything, so add it after all
-            self.nested.append(newSub)
-            print (f'{ansi.rgb_fg(63, 63, 255)}Displaced string: \'{ansi.rgb_fg(0, 255, 255)}{newSub.string}{ansi.rgb_fg(63, 63, 255)}\'')
-            print (f'{ansi.rgb_fg(63, 63, 255)}     Now self is:\n{ansi.all_off}{self}')
-            return newSub
-
-        print (f'{ansi.rgb_fg(63, 63, 255)}Displaced string: \'{ansi.rgb_fg(0, 255, 255)}{newSub.string}{ansi.rgb_fg(63, 63, 255)}\'')
-        print (f'{ansi.rgb_fg(63, 63, 255)}     Now self is:\n{ansi.all_off}{self}')
-
-        return newSub
-
-
-    def markSubStr(self, start, end, styles={}):
-        #breakpoint()
-        assert(start >= 0 and start < len(self.string))
-        assert(end > 0 and end <= len(self.string) and start < end)
-        return self.displaceSubStr(start, end, False, styles)
-
-
-    def removeSubStr(self, start, end):
-        assert(start >= 0 and start < len(self.string))
-        assert(end > 0 and end <= len(self.string) and start < end)
-        return self.displaceSubStr(start, end)
-
-
-    def render(self, styles={}):
-        #breakpoint()
-        src = self.string
-        bareSrc = self.string
-        ps = 0
-
-        cascadedStyles = {**self.styles, **styles}
-        fg, bg = Style.getColors(cascadedStyles)
-
-        #nested = sorted(self.nested, key=lambda x: x.start)
-        print ('--- render')
-        if len(self.nested) > 0:
-            nested = reversed(self.nested)
-            for i, nns in enumerate(nested):
-                sc = ''
-                if nns.start > 0:
-                    sc = f'{fg}{bg}'
-                ec = ''
-                if nns.start < len(self.string) - 1:
-                    ec = f'{fg}{bg}'
-
-                inner = nns.render(cascadedStyles)
-                #src = f'{sc}{self.string[0:nns.start]}{inner}{ec}{self.string[nns.start:]}'
-                bareSrc = f'{bareSrc[0:nns.start]}{inner}{bareSrc[nns.start:]}'
-
-                print (bareSrc)
-        else:
-            bareSrc = f'{self.string}'
-            print (bareSrc)
-
-            #if nns.start - ps > 0:
-            #    fg, bg = Style.getColors(cascadedStyles)
-            #    src += f'{fg}{bg}'
-            #    src += self.string[ps:nns.start]
-            #ps = nns.start
-            #src += nns.render(cascadedStyles)
-
-        #if len(self.string) - ps > 0:
-        #    fg, bg = Style.getColors(cascadedStyles)
-        #    src += f'{fg}{bg}'
-        #    src += self.string[ps:]
-
-        return bareSrc
-
-
-class SubStr:
-    def __init__(self, start, end, styles):
-        self.start = start
-        self.end = end
-        self.styles = styles
-
-    def __repr__(self):
-        return f'start: {self.start}; end: {self.end}'
-
-
-class HierString:
-    def __init__(self, initStr, styles={}):
-        self.string = initStr
-        if isinstance(styles, list):
-            styles = {s: None for s in styles}
-        elif isinstance(styles, Style):
-            styles = {styles: None}
-        if len(styles) > 0:
-            self.subStrs = [SubStr(0, len(initStr), styles)]
-        else:
-            self.subStrs = [SubStr(0, len(initStr), {})]
-
-    def markSubStr(self, start, end, styles):
-        assert(start <= end)
-        assert(start >= 0)
-        assert(end <= len(self.string))
-
-        if isinstance(styles, list):
-            styles = {s: None for s in styles}
-        elif isinstance(styles, Style):
-            styles = {styles: None}
-        self.subStrs.append(SubStr(start, end, styles))
-
-    def render(self):
-        def compare(a, b):
-            if a.start < b.start:
-                return -1
-            elif a.start == b.start and a.end > b.end:
-                return -1
-            elif a.start == b.start and a.end < b.end:
-                return 1
-            elif a.start > b.start:
-                return 1
-            else:
-                return 0
-
-        subStrs = sorted(self.subStrs, key=functools.cmp_to_key(compare))
-
-        src = ''
-        cur = 0
-        subStrCur = 0
-
-        subStrStack = [subStrs[0]]
-        styleStack = [subStrs[0].styles]
-
-        while len(subStrStack) > 0:
-            sub = subStrStack[-1]
-            lenToThisEnd = sub.end - cur
-            lenToNextStart = lenToThisEnd + 1
-            if len(subStrs) > subStrCur + 1:
-                lenToNextStart = subStrs[subStrCur + 1].start - cur
-            amt = min(lenToThisEnd, lenToNextStart)
-
-            if amt > 0:
-                fg, bg = Style.getColors(styleStack[-1])
-                if Style.INVISIBLE not in styleStack[-1]:
-                    src += f'{fg}{bg}'
-                    src += self.string[cur : cur + amt]
-                cur += amt
-
-            # if we're closing a style before we open the next one,
-            if lenToThisEnd < lenToNextStart:
-                subStrStack.pop()
-                styleStack.pop()
-            else:
-                subStrCur += 1
-                subStrStack.append(subStrs[subStrCur])
-                styles = {**styleStack[-1], **subStrs[subStrCur].styles}
-                styleStack.append(styles)
 
         return src
 
@@ -851,13 +514,13 @@ class Counter:
 
 
 class Issue:
-    def __init__(self, errorBlock):
-        self.kind = errorBlock['kind']
-        self.path = Path(errorBlock['locations'][0]['caret']['file'])
-        self.line = errorBlock['locations'][0]['caret']['line']
-        self.children = [Issue(chBlock) for chBlock in errorBlock.get('children', [])]
+    def __init__(self, issueBlock):
+        self.kind = issueBlock['kind']
+        self.path = Path(issueBlock['locations'][0]['caret']['file'])
+        self.line = issueBlock['locations'][0]['caret']['line']
+        self.children = [Issue(chBlock) for chBlock in issueBlock.get('children', [])]
         self.notes = []
-        self.message = errorBlock['message']
+        self.message = issueBlock['message']
         self.issueOpened = False
         self.pathOpened = False
         self.messageOpened = False
@@ -867,7 +530,7 @@ class Issue:
         self.notes.append(Issue(noteBlock))
 
 
-    def strSelf(self, issueCounter, pathCounter, topIssueCounter, depth=0):
+    def render(self, issueCounter, pathCounter, topIssueCounter, depth=0):
         termWidth, _ = shutil.get_terminal_size((80, 20))
 
         src = ''
@@ -875,47 +538,47 @@ class Issue:
         if depth == 0:
             topIssueCounter.inc()
 
-        bgColor = f'{ansi.rgb_bg(0, 31, 0) if topIssueCounter.count % 2 == 1 else ansi.rgb_bg(0, 0, 31)}'
+        bgColor = f'{a.Rgb(0, 31, 0).bg() if topIssueCounter.count % 2 == 1 else a.Rgb(0, 0, 31).bg()}'
 
         if len(self.notes) + len(self.children) > 0:
             issueCounter.inc()
-            src += f'{bgColor}{issueCounter.count:}: {"-" if self.issueOpened else "+"}{ansi.all_off} '
+            src += f'{bgColor}{issueCounter.count:}: {"-" if self.issueOpened else "+"}{a.off} '
         else:
-            src += f'{bgColor}    {ansi.all_off} '
+            src += f'{bgColor}    {a.off} '
 
         if self.kind == 'error':
-            src += f'{ansi.rgb_fg(255, 0, 0)} Err: '
+            src += f'{a.Rgb(255, 0, 0).fg()} Err: '
         elif self.kind == 'warning':
-            src += f'{ansi.rgb_fg(255, 255, 0)}Warn: '
+            src += f'{a.Rgb(255, 255, 0).fg()}Warn: '
         if self.kind == 'note':
-            src += f'{ansi.rgb_fg(0, 255, 255)}Note: '
+            src += f'{a.Rgb(0, 255, 255).fg()}Note: '
 
         pathCounter.inc()
         if self.pathOpened:
-            src += f'{ansi.rgb_fg(255, 255, 255)}'
+            src += f'{a.Rgb(255, 255, 255).fg()}'
         else:
-            src += f'{ansi.rgb_fg(127, 127, 127)}'
+            src += f'{a.Rgb(127, 127, 127).fg()}'
         src += f'{" " if depth > 0 else ""}p{pathCounter.count}:{" " if depth == 0 else ""} '
-        src += f'{strPath(self.path, self.pathOpened)}'
-        src += f' {ansi.rgb_fg(0, 127, 127)}({self.line}): '
+        src += f'{sanitizePath(self.path, self.pathOpened)}'
+        src += f' {a.Rgb(0, 127, 127).fg()}({self.line}): '
 
         if self.messageOpened:
-            src += f'{ansi.rgb_fg(255, 255, 255)}'
+            src += f'{a.Rgb(255, 255, 255).fg()}'
         else:
-            src += f'{ansi.rgb_fg(127, 127, 127)}'
+            src += f'{a.Rgb(127, 127, 127).fg()}'
         src += f'm{pathCounter.count}: '
 
-        msg = sanitizeString(self.message, self.messageOpened, depth == 0 and self.issueOpened)
+        msg = sanitizeMessage(self.message, self.messageOpened, depth == 0 and self.issueOpened)
         msg = justifyMessage(msg.render(), len(strNoColor(src)), termWidth, bgColor)
         src += f'{msg}'
 
-        src += f'{ansi.all_off}\n'
+        src += f'{a.off}\n'
 
         if self.issueOpened:
             for ch in self.children:
-                src += ch.strSelf(issueCounter, pathCounter, topIssueCounter, depth + 1)
+                src += ch.render(issueCounter, pathCounter, topIssueCounter, depth + 1)
             for note in self.notes:
-                src += note.strSelf(issueCounter, pathCounter, topIssueCounter, depth + 1)
+                src += note.render(issueCounter, pathCounter, topIssueCounter, depth + 1)
 
         return src
 
@@ -983,7 +646,7 @@ class Issue:
 
     def __str__(self):
         counter = 0
-        return self.strSelf(0)
+        return self.render(0)
 
 
 def printDivision():
@@ -991,12 +654,12 @@ def printDivision():
     for i in range(0, termWidth):
         y = int(math.sin(2 * math.pi  * i / termWidth * 3) * 255.0)
         if y < 0:
-            print (ansi.rgb_fg(0, 0, -y), end='')
+            print (a.Rgb(0, 0, -y).fg(), end='')
         else:
-            print (ansi.rgb_fg(0, y, 0), end='')
+            print (a.Rgb(0, y, 0).fg(), end='')
         print ('-', end='')
 
-    print (ansi.all_off)
+    print (a.off)
 
 
 def main():
@@ -1036,11 +699,11 @@ def main():
         tc = Counter()
         printDivision()
         for iss in issues:
-            print (iss.strSelf(ec, pc, tc), end='')
+            print (iss.render(ec, pc, tc), end='')
 
         command = ''
         while True:
-            command = input(f'{ansi.all_off}Command? ').strip()
+            command = input(f'{a.off}Command? ').strip()
 
             if len(command) == 0:
                 continue
@@ -1087,8 +750,8 @@ def main():
                 break
 
             else:
-                print (f'''{ansi.rgb_fg(192, 0, 0)}Type an integer to open/close an issue,
+                print (f'''{a.Rgb(192, 0, 0).fg()}Type an integer to open/close an issue,
      "*" to open/close all issues,
      "p" and an integer to expand/contract a path, or "*" to expand/contract all paths,
      "m" and an integer to expand/contract a message, or "*" to expand/contract all messages,
-  or "q" to quit.{ansi.all_off}''')
+  or "q" to quit.{a.off}''')

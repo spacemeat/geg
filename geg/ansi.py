@@ -1,4 +1,4 @@
-all_off = '\033[0m'
+off = '\033[0m'
 
 dk_black_fg = '\033[30m'
 dk_red_fg = '\033[31m'
@@ -34,3 +34,24 @@ def rgb_fg(r, g, b):
 
 def rgb_bg(r, g, b):
     return f'\033[48;2;{r};{g};{b}m'
+
+
+class Rgb:
+    def __init__(self, r = 0, g = 0, b = 0):
+        self.r = r
+        self.g = g
+        self.b = b
+
+    def fg(self):
+        return rgb_fg(int(self.r), int(self.g), int(self.b))
+
+    def bg(self):
+        return rgb_bg(int(self.r), int(self.g), int(self.b))
+
+    def highlight(self):
+        return Rgb(min(self.r * 2, 255), min(self.g * 2, 255), min(self.b * 2, 255))
+
+    def dim(self):
+        return Rgb(self.r / 2, self.g / 2, self.b / 2)
+
+
