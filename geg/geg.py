@@ -1,4 +1,5 @@
 import sys
+import os
 import json
 import subprocess
 from pathlib import Path
@@ -10,6 +11,7 @@ import copy
 from enum import Enum
 import functools
 
+compileErrorsPath = './.gegstash'
 
 debugLevel = 0
 def printDebug(level, string):
@@ -119,6 +121,13 @@ class Style(Enum):
     def getColors(styles):
         styles = Style.normalizeStyles(styles)
 
+        modfgs = [a.Rgb(105, 192, 105),
+                  a.Rgb(105, 127, 192),
+                  a.Rgb(192, 105, 192),
+                  a.Rgb(192, 105, 105),
+                  a.Rgb(211, 145, 91),
+                  a.Rgb(105, 192, 192)]
+
         fg = a.Rgb(127, 127, 127)
         bg = a.Rgb(0, 0, 0)
 
@@ -135,10 +144,7 @@ class Style(Enum):
             if Style.TYPE not in styles:
                 if Style.AKA not in styles:
                     if Style.TEMPLATEARGS in styles:
-                        if styles[Style.TEMPLATEARGS] % 2 == 0:
-                            fg = a.Rgb(192, 95, 192)
-                        else:
-                            fg = a.Rgb(95, 127, 211)
+                        fg = modfgs[styles[Style.TEMPLATEARGS] % 6]
                     elif Style.PARAM in styles:
                         fg = a.Rgb(191, 147, 127)
                     else:
@@ -150,10 +156,7 @@ class Style(Enum):
                     fg = a.Rgb(192, 192, 95)
 
                 elif Style.AKA not in styles and Style.TEMPLATEARGS in styles:
-                    if styles[Style.TEMPLATEARGS] % 2 == 0:
-                        fg = a.Rgb(192, 95, 192)
-                    else:
-                        fg = a.Rgb(95, 127, 211)
+                    fg = modfgs[styles[Style.TEMPLATEARGS] % 6]
                 else:
                     fg = a.Rgb(71, 47, 91)
 
@@ -243,6 +246,18 @@ def sanitizeMessage(message, makeOpened, highlighted):
                         rec(newSub)
                         return True
                 return False
+            
+            def findPairOf2(startSeq, endSeq, styles={}):
+                sn = len(nestedString.string)
+                while sn >= 0:
+                    if (sn := nestedString.string[:sn].rfind(startSeq)) >= 0:
+                        en = nestedString.string[sn + len(startSeq):].find(endSeq) + sn + len(startSeq)
+                        if en > sn and (sn > 0 or en < len(nestedString.string) - 1):
+                            newSub = nestedString.modSubstring(sn, en + 1, styles)
+                            rec(newSub)
+                            return True
+                return False
+
 
             if findPairOf('<', '>', Style.TEMPLATEARGS):
                 continue
@@ -270,6 +285,16 @@ def sanitizeMessage(message, makeOpened, highlighted):
                 return False
 
             if findCommas():
+                continue
+
+            if findPairOf2('allocator<', '>', Style.DIM):
+                continue
+
+            if findPairOf2('char_traits<', '>', Style.DIM):
+                continue
+
+            if (tn := nestedString.string.find('basic_')) >= 0:
+                newSub = nestedString.modSubstring(tn, tn + len('basic_'), Style.DIM)
                 continue
 
             if (tn := nestedString.string.find('const ')) >= 0:
@@ -516,7 +541,7 @@ class Counter:
 class Issue:
     def __init__(self, issueBlock):
         self.kind = issueBlock['kind']
-        self.path = Path(issueBlock['locations'][0]['caret']['file'])
+        self.path = Path(issueBlock['locations'][0]['caret']['file']).resolve()
         self.line = issueBlock['locations'][0]['caret']['line']
         self.children = [Issue(chBlock) for chBlock in issueBlock.get('children', [])]
         self.notes = []
@@ -558,7 +583,7 @@ class Issue:
             src += f'{a.Rgb(255, 255, 255).fg()}'
         else:
             src += f'{a.Rgb(127, 127, 127).fg()}'
-        src += f'{" " if depth > 0 else ""}p{pathCounter.count}:{" " if depth == 0 else ""} '
+        src += f'{" " if depth > 0 else ""}{a.Rgb(31, 255, 255).dim().fg()}p{pathCounter.count}:{" " if depth == 0 else ""} '
         src += f'{sanitizePath(self.path, self.pathOpened)}'
         src += f' {a.Rgb(0, 127, 127).fg()}({self.line}): '
 
@@ -663,21 +688,38 @@ def printDivision():
 
 
 def main():
-    cmd = ' '.join(sys.argv[1:]) + ' -fdiagnostics-format=json'
+    #src = sys.stdin.read()
+    #if len(src) == 0:
+    #    return
 
-    proc = doShellCommand(cmd)
-    src = proc.stderr
-    if len(src) == 0:
-        print (proc.stdout)
-        return
+    src = ''
+    go = True
+
+    if not os.path.exists(compileErrorsPath):
+        print ('No compile errors.')
+        return 0
+
+    f = open(compileErrorsPath)
+
+    while go:
+        #l = sys.stdin.readline()
+        l = f.readline()
+        if l == 'END_OF_ERR\n':
+            go = False
+        else:
+            src += l
+            #src += '\n'
 
     endl = '\n'
-    fsrc = f'[{",".join([f"{s}" for s in src.strip().split(endl)])}]'
+
+    stuff = ",".join([f"{s}" for s in src.strip().split(endl) if len(s) > 0])
+
+    fsrc = f'[{stuff}]'
 
     try:
         issuesSrc = json.loads(fsrc)
     except:
-        print(src)
+        print(fsrc)
         quit()
 
     issues = []
@@ -755,3 +797,5 @@ def main():
      "p" and an integer to expand/contract a path, or "*" to expand/contract all paths,
      "m" and an integer to expand/contract a message, or "*" to expand/contract all messages,
   or "q" to quit.{a.off}''')
+    
+    return 0
