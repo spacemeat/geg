@@ -700,15 +700,7 @@ def main():
         return 0
 
     f = open(compileErrorsPath)
-
-    while go:
-        #l = sys.stdin.readline()
-        l = f.readline()
-        if l == 'END_OF_ERR\n':
-            go = False
-        else:
-            src += l
-            #src += '\n'
+    src = f.read()
 
     endl = '\n'
 
