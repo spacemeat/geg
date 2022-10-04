@@ -11,7 +11,7 @@ import copy
 from enum import Enum
 import functools
 
-compileErrorsPath = './.gegstash'
+compileErrorsPath = './.gegstash.json'
 
 debugLevel = 0
 def printDebug(level, string):
@@ -122,7 +122,7 @@ class Style(Enum):
         styles = Style.normalizeStyles(styles)
 
         modfgs = [a.Rgb(105, 192, 105),
-                  a.Rgb(105, 127, 192),
+                  a.Rgb(105, 107, 192),
                   a.Rgb(192, 105, 192),
                   a.Rgb(192, 105, 105),
                   a.Rgb(211, 145, 91),
@@ -148,12 +148,12 @@ class Style(Enum):
                     elif Style.PARAM in styles:
                         fg = a.Rgb(191, 147, 127)
                     else:
-                        fg = a.Rgb(192, 192, 95)
+                        fg = a.Rgb(31, 137, 192)
                 else:
                     fg = a.Rgb(71, 31, 71)
             else:
                 if Style.AKA not in styles and Style.TEMPLATEARGS not in styles:
-                    fg = a.Rgb(192, 192, 95)
+                    fg = a.Rgb(31, 137, 192)
 
                 elif Style.AKA not in styles and Style.TEMPLATEARGS in styles:
                     fg = modfgs[styles[Style.TEMPLATEARGS] % 6]
@@ -242,7 +242,8 @@ def sanitizeMessage(message, makeOpened, highlighted):
                         if i < len(nestedString.string) - 1 and nestedString.string[i + 1] != endCh:
                             lessPos = i
                     if ch == endCh and lessPos > -1 and i > 0 and nestedString.string[i - 1] != startCh:
-                        newSub = nestedString.modSubstring(lessPos + 1, i, styles)
+                        if lessPos + 1 < i:
+                            newSub = nestedString.modSubstring(lessPos + 1, i, styles)
                         rec(newSub)
                         return True
                 return False
@@ -301,12 +302,16 @@ def sanitizeMessage(message, makeOpened, highlighted):
                 newSub = nestedString.modSubstring(tn, tn + len('const '), Style.DIM)
                 continue
 
+            if (tn := nestedString.string.find('constexpr ')) >= 0:
+                newSub = nestedString.modSubstring(tn, tn + len('constexpr '), Style.DIM)
+                continue
+
             if (tn := nestedString.string.find('class ')) >= 0:
                 newSub = nestedString.modSubstring(tn, tn + len('class '), Style.DIM)
                 continue
 
             if (tn := nestedString.string.find('struct ')) >= 0:
-                newSub = nestedString.modSubstring(tn, tn + len('class '), Style.DIM)
+                newSub = nestedString.modSubstring(tn, tn + len('struct '), Style.DIM)
                 continue
 
             match = scopedTypeRegex.search(nestedString.string)
@@ -438,8 +443,8 @@ class ModdedString:
 
         styles = Style.normalizeStyles(styles)
 
-        printDebug (1, f'{cm}DisplaceSubStr: start: {start}; end: {end}; from: \'{cs}{self.string[0:start]}{ch}{self.string[start:end]}{cs}{self.string[end:]}{cm}\' as {"|".join([s.name for s in styles.keys()])}{a.off}')
-        printDebug (2, f'{cm}     Top self is:\n{a.off}{self}')
+        #printDebug (1, f'{cm}DisplaceSubStr: start: {start}; end: {end}; from: \'{cs}{self.string[0:start]}{ch}{self.string[start:end]}{cs}{self.string[end:]}{cm}\' as {"|".join([s.name for s in styles.keys()])}{a.off}')
+        #printDebug (2, f'{cm}     Top self is:\n{a.off}{self}')
 
         removals = []
         newStrings = []
@@ -501,7 +506,7 @@ class ModdedString:
             for i in range(strStart + 1, strEnd):
                 del self.mods[strStart + 1]
 
-        printDebug (2, f'{cm}     Now self is:\n{a.off}{self}')
+        #printDebug (2, f'{cm}     Now self is:\n{a.off}{self}')
         assert(len(self.strings) - len(self.mods) == 1)
 
         return m
@@ -696,7 +701,6 @@ def main():
     go = True
 
     if not os.path.exists(compileErrorsPath):
-        print ('No compile errors.')
         return 0
 
     f = open(compileErrorsPath)
